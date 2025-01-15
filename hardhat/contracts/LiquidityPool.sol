@@ -23,10 +23,9 @@ contract LiquidityPool is ReentrancyGuard {
     IERC20 public token1;
     IERC20 public token2;
     
-    uint256 public totalShares; // Total liquidity shares
-    mapping(address => uint256) public shares; // Liquidity shares per user
+    uint256 public totalShares; 
+    mapping(address => uint256) public shares; 
     
-    // Minimum liquidity to prevent division by zero
     uint256 private constant MINIMUM_LIQUIDITY = 1000;
     
     event LiquidityAdded(address indexed provider, uint256 amount1, uint256 amount2, uint256 shares);
