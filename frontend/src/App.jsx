@@ -1,4 +1,4 @@
-import LiquidityPool from './pages/Liquiditypool'
+import LiquidityPool from "./pages/Liquiditypool"
 
 function App() {
 
