@@ -3,6 +3,7 @@ pragma solidity ^0.8.0;
 
 import "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import "@openzeppelin/contracts/security/ReentrancyGuard.sol";
+import "@openzeppelin/contracts/utils/math/Math.sol";
 
 // First Token
 contract Token1 is ERC20 {
@@ -18,7 +19,8 @@ contract Token2 is ERC20 {
     }
 }
 
-// Liquidity Pool Contract
+// Liquidity Pool
+
 contract LiquidityPool is ReentrancyGuard {
     IERC20 public token1;
     IERC20 public token2;
@@ -27,6 +29,7 @@ contract LiquidityPool is ReentrancyGuard {
     mapping(address => uint256) public shares; 
     
     uint256 private constant MINIMUM_LIQUIDITY = 1000;
+    uint256 private constant PRECISION = 1e18;
     
     event LiquidityAdded(address indexed provider, uint256 amount1, uint256 amount2, uint256 shares);
     event LiquidityRemoved(address indexed provider, uint256 amount1, uint256 amount2, uint256 shares);
@@ -38,50 +41,53 @@ contract LiquidityPool is ReentrancyGuard {
         token2 = IERC20(_token2);
     }
     
-    // Get reserves of both tokens
     function getReserves() public view returns (uint256 reserve1, uint256 reserve2) {
         reserve1 = token1.balanceOf(address(this));
         reserve2 = token2.balanceOf(address(this));
     }
     
-    // Add liquidity to the pool
-    function addLiquidity(uint256 amount1, uint256 amount2) external nonReentrant returns (uint256 share) {
-        require(amount1 > 0 && amount2 > 0, "Amounts must be greater than 0");
+function addLiquidity(uint256 amount1, uint256 amount2) external nonReentrant returns (uint256 share) {
+    require(amount1 > 0 && amount2 > 0, "Amounts must be greater than 0");
+    
+    (uint256 reserve1, uint256 reserve2) = getReserves();
+    
+    // If first deposit
+    if (totalShares == 0) {
+        share = Math.sqrt(amount1 * amount2) - MINIMUM_LIQUIDITY;
+        totalShares = share + MINIMUM_LIQUIDITY;
+    } else {
+        // Check proportional deposit
+        require(amount1 * reserve2 == amount2 * reserve1, "Non-proportional deposit");
         
-        // Transfer tokens to the contract
-        require(token1.transferFrom(msg.sender, address(this), amount1), "Transfer of token1 failed");
-        require(token2.transferFrom(msg.sender, address(this), amount2), "Transfer of token2 failed");
-        
-        // Calculate shares
-        if (totalShares == 0) {
-            share = Math.sqrt(amount1 * amount2) - MINIMUM_LIQUIDITY;
-            totalShares = share + MINIMUM_LIQUIDITY;
-        } else {
-            (uint256 reserve1, uint256 reserve2) = getReserves();
-            share = Math.min(
-                (amount1 * totalShares) / reserve1,
-                (amount2 * totalShares) / reserve2
-            );
-        }
-        
-        require(share > 0, "Insufficient liquidity minted");
-        shares[msg.sender] += share;
-        
-        emit LiquidityAdded(msg.sender, amount1, amount2, share);
+        // Calculate shares - can use either token as they should yield same result
+        share = Math.mulDiv(amount1, totalShares, reserve1);
+        totalShares += share;
     }
     
-    // Remove liquidity from the pool
+    require(token1.transferFrom(msg.sender, address(this), amount1), "Transfer of token1 failed");
+    require(token2.transferFrom(msg.sender, address(this), amount2), "Transfer of token2 failed");
+    
+    require(share > 0, "Insufficient liquidity minted");
+    shares[msg.sender] += share;
+    
+    emit LiquidityAdded(msg.sender, amount1, amount2, share);
+}
     function removeLiquidity(uint256 share) external nonReentrant returns (uint256 amount1, uint256 amount2) {
         require(share > 0 && shares[msg.sender] >= share, "Insufficient shares");
+        require(totalShares > share, "Cannot remove all liquidity");
         
         (uint256 reserve1, uint256 reserve2) = getReserves();
         
-        // Calculate token amounts to return
-        amount1 = (share * reserve1) / totalShares;
-        amount2 = (share * reserve2) / totalShares;
+        // Scale down calculations to avoid overflow
+        uint256 shareRatio = Math.mulDiv(share, PRECISION, totalShares);
+        
+        // Calculate amounts using the ratio
+        amount1 = Math.mulDiv(reserve1, shareRatio, PRECISION);
+        amount2 = Math.mulDiv(reserve2, shareRatio, PRECISION);
         
         require(amount1 > 0 && amount2 > 0, "Insufficient liquidity burned");
         
+        // Update state before transfers
         shares[msg.sender] -= share;
         totalShares -= share;
         
@@ -92,7 +98,6 @@ contract LiquidityPool is ReentrancyGuard {
         emit LiquidityRemoved(msg.sender, amount1, amount2, share);
     }
     
-    // Swap tokens
     function swap(uint256 amountIn, bool token1ToToken2) external nonReentrant returns (uint256 amountOut) {
         require(amountIn > 0, "Amount must be greater than 0");
         
@@ -100,38 +105,16 @@ contract LiquidityPool is ReentrancyGuard {
         
         if (token1ToToken2) {
             require(token1.transferFrom(msg.sender, address(this), amountIn), "Transfer of token1 failed");
-            // Calculate amount out using constant product formula (x * y = k)
-            // Fee of 0.3% is applied
-            uint256 amountInWithFee = amountIn * 997;
-            amountOut = (amountInWithFee * reserve2) / ((reserve1 * 1000) + amountInWithFee);
+            uint256 amountInWithFee = Math.mulDiv(amountIn, 997, 1000);
+            amountOut = Math.mulDiv(amountInWithFee, reserve2, reserve1 + amountInWithFee);
             require(token2.transfer(msg.sender, amountOut), "Transfer of token2 failed");
         } else {
             require(token2.transferFrom(msg.sender, address(this), amountIn), "Transfer of token2 failed");
-            uint256 amountInWithFee = amountIn * 997;
-            amountOut = (amountInWithFee * reserve1) / ((reserve2 * 1000) + amountInWithFee);
+            uint256 amountInWithFee = Math.mulDiv(amountIn, 997, 1000);
+            amountOut = Math.mulDiv(amountInWithFee, reserve1, reserve2 + amountInWithFee);
             require(token1.transfer(msg.sender, amountOut), "Transfer of token1 failed");
         }
         
         emit Swap(msg.sender, amountIn, amountOut, token1ToToken2);
-    }
-}
-
-// Math library for safe math operations
-library Math {
-    function min(uint256 a, uint256 b) internal pure returns (uint256) {
-        return a < b ? a : b;
-    }
-    
-    function sqrt(uint256 y) internal pure returns (uint256 z) {
-        if (y > 3) {
-            z = y;
-            uint256 x = y / 2 + 1;
-            while (x < z) {
-                z = x;
-                x = (y / x + x) / 2;
-            }
-        } else if (y != 0) {
-            z = 1;
-        }
     }
 }
