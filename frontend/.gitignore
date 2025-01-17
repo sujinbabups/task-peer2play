@@ -11,7 +11,6 @@ node_modules
 dist
 dist-ssr
 *.local
-LiquidityPool.jsx
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json
@@ -23,4 +22,7 @@ LiquidityPool.jsx
 *.sln
 *.sw?
 
+
+components/
+pages/Liquidity.jsx
 
