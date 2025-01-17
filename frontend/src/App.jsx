@@ -1,8 +1,8 @@
 import React, { useEffect, useState } from 'react';
 import { ArrowDownUp, Plus, Minus } from 'lucide-react';
 import { ethers } from 'ethers';
-import { abi } from '../scdata/abi.json';
-import depadd from '../scdata/deployed_address.json'
+import { abi } from './scdata/abi.json';
+import depadd from './scdata/deployed_address.json'
 const deployedAddress =depadd.LiquidityModuleLiquidityPool;
 
 const tokens = {
